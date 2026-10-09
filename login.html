@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#17201B">
+<title>Ingresar · Recorridas</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/estilos.css">
+<style>
+body{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+form{width:100%;max-width:400px;padding:32px;display:flex;flex-direction:column;gap:18px}
+h1{margin:0;font-size:28px;font-weight:600}
+.kicker{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+</style>
+</head>
+<body>
+<form class="card" id="f" novalidate>
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <div class="kicker">Recorridas</div>
+    <h1>Ingresar</h1>
+  </div>
+  <label class="f">Usuario<input id="u" name="username" autocomplete="username" autocapitalize="none" required></label>
+  <label class="f">Contraseña<input id="p" name="password" type="password" autocomplete="current-password" required></label>
+  <div id="e" class="err" hidden></div>
+  <button class="btn dark" id="b" style="height:50px;font-size:16px">Ingresar</button>
+</form>
+<script src="/comun.js"></script>
+<script>
+const f = document.getElementById('f'), e = document.getElementById('e'), b = document.getElementById('b');
+f.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  e.hidden = true; b.disabled = true;
+  try {
+    const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: f.username.value.trim(), password: f.password.value }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'No se pudo ingresar.');
+    const wantsApp = new URLSearchParams(location.search).get('a') === 'app';
+    const mobile = /Mobi|Android|iPhone/i.test(navigator.userAgent);
+    location.href = d.role === 'vendedor' && (wantsApp || mobile) ? '/app' : '/panel';
+  } catch (err) {
+    e.textContent = err.message; e.hidden = false; b.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

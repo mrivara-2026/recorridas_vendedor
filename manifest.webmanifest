@@ -1,0 +1,10 @@
+{
+  "name": "Recorridas",
+  "short_name": "Recorridas",
+  "start_url": "/app",
+  "display": "standalone",
+  "background_color": "#F3F2EE",
+  "theme_color": "#17201B",
+  "lang": "es",
+  "icons": [{ "src": "/icono.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
