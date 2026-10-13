@@ -82,8 +82,11 @@ function suggest(candidates, n, start) {
   if (!cands.length || n < 1) return [];
   const origin = start && start.lat != null ? start : cands.reduce((a, b) => (b.lng < a.lng ? b : a));
   const post = cands.filter((c) => c.postponed).sort((a, b) => km(origin, a) - km(origin, b));
-  const pend = cands.filter((c) => !c.postponed);
+  // Después de las pendientes, los supermercados sin ventas hace más tiempo (urgencia de venta)
+  const urg = cands.filter((c) => !c.postponed && c.urgent).sort((a, b) => (b.urgentDays || 0) - (a.urgentDays || 0));
+  const pend = cands.filter((c) => !c.postponed && !c.urgent);
   const chosen = post.slice(0, n);
+  for (const u of urg) { if (chosen.length < n) chosen.push(u); else pend.push(u); }
   while (chosen.length < n && pend.length) {
     const anchors = chosen.length ? chosen : [origin];
     let bi = 0, bd = Infinity;

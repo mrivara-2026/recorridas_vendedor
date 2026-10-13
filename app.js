@@ -59,6 +59,7 @@ function renderPlan() {
         <span class="mono" style="font-size:13px;color:var(--muted)">${z.visitadas}/${z.total} este mes</span></div>
         <div class="zbar" style="width:100%"><div style="width:${pv}%;background:var(--green)"></div><div style="width:${pp}%;background:var(--orange-mid)"></div></div>
         <div style="font-size:14px;color:var(--ink2)">${full ? 'Zona completa este mes' : `${z.disponibles} por visitar${z.postergadas ? ` · ${z.postergadas} ${z.postergadas === 1 ? 'quedó pendiente' : 'quedaron pendientes'}` : ''}`}</div>
+        ${!full && z.urgentes ? `<div style="font-size:13px;color:var(--orange-ink);font-weight:600">${z.urgentes} ${z.urgentes === 1 ? 'supermercado' : 'supermercados'} sin ventas hace tiempo</div>` : ''}
       </button>`;
     }).join('')}
     ${m ? `<div class="sec" style="flex-direction:row;align-items:center;justify-content:space-between;margin-top:6px">
@@ -83,11 +84,12 @@ function renderLista() {
       const tag = it.status === 'si' ? `<div style="font-size:13px;color:var(--green-ink)">Visita SÍ · ${hora(it.visit?.arrived_at)}${it.visit?.saved_at ? '' : ' · falta guardar'}</div>`
         : it.status === 'no' ? `<div style="font-size:13px;color:var(--orange-ink)">Visita NO · vuelve a sugerirse${it.visit?.saved_at ? '' : ' · falta guardar'}</div>`
         : it.carried ? '<div style="font-size:13px;color:var(--orange-ink)">Quedó pendiente la vez anterior</div>' : '';
+      const urg = it.status === 'pending' && it.urgencia?.nivel ? `<div style="font-size:13px;color:var(--orange-ink);font-weight:600">${esc(it.urgencia.texto)} · prioridad</div>` : '';
       return `<button class="stop" data-act="abrir" data-id="${it.item_id}">
         <div class="num ${it.status === 'si' ? 'si' : it.status === 'no' ? 'no' : ''}">${it.position}</div>
         <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
           <div style="display:flex;align-items:center;gap:8px"><span class="badge ${c.empresa}">${c.empresa}</span><span style="font-size:16px;font-weight:600">${esc(c.nombre)}</span></div>
-          <div style="font-size:14px;color:var(--muted)">${esc(c.direccion)}${c.horario ? ' · ' + esc(c.horario) : ''}</div>${tag}
+          <div style="font-size:14px;color:var(--muted)">${esc(c.direccion)}${c.horario ? ' · ' + esc(c.horario) : ''}</div>${tag}${urg}
         </div>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8A918C" stroke-width="2" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
       </button>`;

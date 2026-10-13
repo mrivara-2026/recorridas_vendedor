@@ -62,6 +62,7 @@ Cómo usarla bien: marcar **SÍ/NO al llegar** al local y tocar **Guardar al irs
 
 ## Cómo funciona
 
+- **Sin link de Maps**: si una sucursal no tiene link, el sistema la ubica por dirección y zona con OpenStreetMap (aproximado; en la tabla aparece marcada con ≈). Pegando el link de Maps queda exacta.
 - **Importar Excel**: usá la plantilla ("Descargar plantilla" en Clientes). Cada archivo se suma a la base. Una sucursal se considera la misma si tiene la misma ubicación (a menos de 15 m) o el mismo nombre y dirección: en ese caso se actualiza, no se duplica. Antes de confirmar ves un resumen con nuevas, actualizadas, sin cambios, posibles repetidos y filas con error.
 - **Sugerencias**: primero las que quedaron pendientes (NO, o sin visitar al terminar la jornada); después las más cercanas entre sí que no tuvieron visita SÍ en el mes. El orden empieza en la ubicación del vendedor.
 - **Control de jornada**: inicio, cada visita (llegada, salida, minutos, distancia a la sucursal), hora y ubicación de cada foto, traslados, tiempo sin actividad y fin de jornada con su ubicación. Alertas si una foto o una visita se marcó a más de 300 m de la sucursal, si hubo más de 1 hora sin actividad antes del cierre o si no tocó "Terminar jornada".
@@ -74,3 +75,14 @@ Todo está en la carpeta de datos (`recorridas.db` y la carpeta `fotos`). Copial
 ## Pruebas
 
 `python3 tests/e2e.py` levanta el sistema con una base vacía y prueba todas las funciones con un navegador real (requiere Python con `playwright`, `openpyxl` y `Pillow`).
+
+## Planilla de ventas (Disco, Devoto y Geant)
+
+En **Clientes → Planilla de ventas** (solo administrador) se sube la planilla de facturas (la misma "Consulta Factura Sucursal", una vez por mes). El sistema:
+
+- Toma solo facturas (no notas de crédito) de Disco, Devoto (Devoto Hnos y Devoto Express) y Geant.
+- Calcula hace cuántos días no hay venta en cada sucursal.
+- Vincula cada sucursal de la planilla con el cliente que tiene el mismo **Código ventas** (DISCO27, DEV3005, GEANT1…). Si el nombre del cliente es claro ("Disco Lostorto"), lo vincula solo.
+- Al armar la recorrida, después de las paradas que quedaron pendientes, entran primero los supermercados sin ventas hace 30 días o más (los de más días primero). El orden de la recorrida sigue siendo por cercanía.
+
+Los umbrales se pueden cambiar con las variables `URGENCIA_MEDIA_DIAS` (30) y `URGENCIA_ALTA_DIAS` (45).

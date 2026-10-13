@@ -17,7 +17,8 @@ echo "=== Inicio de la instalación: $(date) ==="
 export DEBIAN_FRONTEND=noninteractive
 SIMULAR="${SIMULAR:-0}"   # 1 = prueba sin systemd ni firewall
 
-APP_DIR=/opt/recorridas
+APP_DIR=/opt/recorridas/app
+REPO_DIR=/opt/recorridas/repo
 DATA_DIR=/var/lib/recorridas
 
 # 1. Memoria extra (swap) para servidores de 1 GB
@@ -39,12 +40,31 @@ fi
 command -v caddy >/dev/null || apt-get install -y caddy
 
 # 3. Usuario del sistema, código y dependencias
-id recorridas >/dev/null 2>&1 || useradd --system --home "$APP_DIR" --shell /usr/sbin/nologin recorridas
-mkdir -p "$DATA_DIR" /var/backups/recorridas
-if [ -d "$APP_DIR/.git" ]; then git -C "$APP_DIR" pull --ff-only; else rm -rf "$APP_DIR"; git clone --depth 1 "$REPO" "$APP_DIR"; fi
+id recorridas >/dev/null 2>&1 || useradd --system --home /opt/recorridas --shell /usr/sbin/nologin recorridas
+mkdir -p "$DATA_DIR" /var/backups/recorridas /opt/recorridas
+
+# Ordena el código en carpetas (funciona aunque en GitHub los archivos hayan quedado todos sueltos)
+cat > /usr/local/bin/organizar-recorridas <<'ORG'
+#!/bin/bash
+set -euo pipefail
+SRC=/opt/recorridas/repo
+DST=/opt/recorridas/app
+mkdir -p "$DST/lib" "$DST/public"
+buscar() { # busca un archivo en la raíz o en su carpeta
+  for c in "$SRC/$2/$1" "$SRC/$1" "$SRC/recorridas/$2/$1" "$SRC/recorridas/$1"; do [ -f "$c" ] && { echo "$c"; return; }; done
+  echo "Falta el archivo $1 en el repositorio" >&2; exit 1
+}
+for f in server.js package.json package-lock.json; do cp "$(buscar $f .)" "$DST/$f"; done
+for f in db.js fotos.js geo.js geocode.js time.js excel.js; do cp "$(buscar $f lib)" "$DST/lib/$f"; done
+for f in app.html app.js comun.js estilos.css login.html panel.html panel.js icono.svg manifest.webmanifest; do cp "$(buscar $f public)" "$DST/public/$f"; done
+ORG
+chmod 755 /usr/local/bin/organizar-recorridas
+
+if [ -d "$REPO_DIR/.git" ]; then git -C "$REPO_DIR" pull --ff-only; else rm -rf "$REPO_DIR"; git clone --depth 1 "$REPO" "$REPO_DIR"; fi
+/usr/local/bin/organizar-recorridas
 cd "$APP_DIR"
 npm ci --omit=dev
-chown -R recorridas:recorridas "$APP_DIR" "$DATA_DIR"
+chown -R recorridas:recorridas /opt/recorridas "$DATA_DIR"
 
 # 4. Configuración (contraseñas iniciales: solo se usan la primera vez)
 cat > /etc/recorridas.env <<EOF
@@ -105,14 +125,15 @@ chmod 755 /etc/cron.daily/recorridas-backup
 cat > /usr/local/bin/actualizar-recorridas <<EOF
 #!/bin/sh
 set -e
-cd $APP_DIR
-sudo -u recorridas git pull --ff-only
-sudo -u recorridas npm ci --omit=dev
+sudo -u recorridas git -C $REPO_DIR pull --ff-only
+/usr/local/bin/organizar-recorridas
+cd $APP_DIR && npm ci --omit=dev
+chown -R recorridas:recorridas /opt/recorridas
 systemctl restart recorridas
 echo "Recorridas actualizado."
 EOF
 chmod 755 /usr/local/bin/actualizar-recorridas
-git config --system --add safe.directory "$APP_DIR"
+git config --system --add safe.directory "$REPO_DIR"
 
 if [ "$SIMULAR" = 1 ]; then echo "=== Simulación terminada: $DOMINIO ==="; exit 0; fi
 

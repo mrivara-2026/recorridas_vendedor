@@ -42,7 +42,7 @@ async function abrir(tab) {
   history.replaceState(null, '', '#' + tab);
   if (mapa) { mapa.remove(); mapa = null; }
   try {
-    if (tab === 'clientes') { P.clients = await api('/api/clients'); renderClientes(); }
+    if (tab === 'clientes') { [P.clients, P.ventas] = await Promise.all([api('/api/clients'), isAdmin() ? api('/api/ventas') : null]); renderClientes(); }
     else if (tab === 'zonas') { P.zonas = await api('/api/zones'); if (!P.zonas.zonas.find((z) => z.zona === P.zonaSel)) P.zonaSel = P.zonas.zonas[0]?.zona || null; renderZonas(); }
     else if (tab === 'visitas') { await cargarVisitas(); }
     else if (tab === 'control') { if (!P.usuarios.length) P.usuarios = (await api('/api/users')).filter((u) => u.role === 'vendedor'); if (!P.cUsuario && P.usuarios[0]) P.cUsuario = String(P.usuarios[0].id); await cargarControl(); }
@@ -62,7 +62,7 @@ function renderClientes() {
     <div class="grid2">
       <div class="card drop" id="drop">
         <div style="font-size:17px;font-weight:600">Subir Excel de clientes</div>
-        <div style="font-size:14px;color:var(--muted)">Arrastrá el archivo acá o elegilo (.xlsx o .csv). Columnas: <span class="mono" style="color:var(--ink)">Empresa · Nombre · Dirección · Zona · Horario (opcional) · Link Google Maps</span></div>
+        <div style="font-size:14px;color:var(--muted)">Arrastrá el archivo acá o elegilo (.xlsx o .csv). Columnas: <span class="mono" style="color:var(--ink)">Empresa · Nombre · Dirección · Zona · Horario (opcional) · Link Google Maps (opcional) · Código ventas (opcional)</span></div>
         <div style="font-size:14px;color:var(--muted)">Cada archivo se suma a la base. Lo que ya existe (misma ubicación, o mismo nombre y dirección) se actualiza sin duplicarse. Antes de confirmar ves un resumen.</div>
         <div style="display:flex;flex-wrap:wrap;gap:8px">
           <label class="btn dark">Elegir archivo<input type="file" id="xls" accept=".xlsx,.csv" class="sr"></label>
@@ -80,6 +80,7 @@ function renderClientes() {
         <button class="btn green" data-act="nueva" style="align-self:flex-start;margin-top:4px">+ Agregar sucursal</button>
       </div>
     </div>
+    ${isAdmin() ? tarjetaVentas() : ''}
     <div class="fil">
       <div class="chips">${['Todas', ...zonas].map((z) => `<button class="chipb" data-act="fz" data-z="${esc(z)}" aria-pressed="${P.filtroZona === z}">${esc(z)}</button>`).join('')}</div>
       <label class="sr" for="fe">Empresa</label><select id="fe" data-act="fe"><option value="">BEC y MAN</option><option value="BEC" ${P.filtroEmpresa === 'BEC' ? 'selected' : ''}>BEC · restaurantes</option><option value="MAN" ${P.filtroEmpresa === 'MAN' ? 'selected' : ''}>MAN · supermercados</option></select>
@@ -87,15 +88,16 @@ function renderClientes() {
       <span class="muted" style="font-size:14px">${rows.length} de ${P.clients.length} sucursales</span>
     </div>
     <div class="card tbl">
-      ${P.clients.length ? `<table><thead><tr><th>Empresa</th><th>Nombre</th><th>Dirección</th><th>Zona</th><th>Horario</th><th>Link Google Maps</th><th>Este mes</th><th><span class="sr">Acciones</span></th></tr></thead><tbody>
+      ${P.clients.length ? `<table><thead><tr><th>Empresa</th><th>Nombre</th><th>Dirección</th><th>Zona</th><th>Código ventas</th><th>Horario</th><th>Link Google Maps</th><th>Este mes</th><th><span class="sr">Acciones</span></th></tr></thead><tbody>
       ${rows.map((c) => `<tr data-id="${c.id}">
         <td><select aria-label="Empresa" data-f="empresa"><option ${c.empresa === 'BEC' ? 'selected' : ''}>BEC</option><option ${c.empresa === 'MAN' ? 'selected' : ''}>MAN</option></select></td>
         <td><input aria-label="Nombre" data-f="nombre" value="${esc(c.nombre)}" style="width:230px"></td>
         <td><input aria-label="Dirección" data-f="direccion" value="${esc(c.direccion)}" style="width:190px"></td>
         <td><input aria-label="Zona" data-f="zona" value="${esc(c.zona)}" style="width:120px" list="dl-zonas"></td>
+        <td><input aria-label="Código de ventas" data-f="codigo" value="${esc(c.codigo)}" placeholder="—" style="width:96px" class="mono"></td>
         <td><input aria-label="Horario" data-f="horario" value="${esc(c.horario)}" placeholder="—" style="width:110px" class="mono"></td>
-        <td><input aria-label="Link de Google Maps" data-f="link" value="${esc(c.link)}" style="width:220px;font-size:12px" class="mono"> <a href="https://www.google.com/maps?q=${c.lat},${c.lng}" target="_blank" rel="noopener" style="font-size:13px">ver</a></td>
-        <td><span class="pill ${ST[c.status].cls}">${c.status === 'visitada' ? 'Visitada' : c.status === 'postergada' ? 'Pendiente anterior' : 'Sin visitar'}</span></td>
+        <td><input aria-label="Link de Google Maps" data-f="link" value="${esc(c.link)}" style="width:220px;font-size:12px" class="mono"> <a href="https://www.google.com/maps?q=${c.lat},${c.lng}" target="_blank" rel="noopener" style="font-size:13px">ver</a>${c.geo_fuente !== 'link' ? ` <span class="pill ${c.geo_fuente === 'zona' ? 'warn' : 'idle'}" title="Ubicada por ${c.geo_fuente === 'zona' ? 'zona (muy aproximado)' : 'dirección'}: pegá el link de Maps para que quede exacta">≈ ${c.geo_fuente === 'zona' ? 'zona' : 'dirección'}</span>` : ''}</td>
+        <td><span class="pill ${ST[c.status].cls}">${c.status === 'visitada' ? 'Visitada' : c.status === 'postergada' ? 'Pendiente anterior' : 'Sin visitar'}</span> ${pillUrg(c.urgencia)}</td>
         <td><button class="iconbtn" data-act="borrar" aria-label="Eliminar ${esc(c.nombre)}">${ICON_DEL}</button></td></tr>`).join('')}
       </tbody></table><datalist id="dl-zonas">${zonas.map((z) => `<option value="${esc(z)}">`).join('')}</datalist>` : '<div style="padding:30px;text-align:center" class="muted">Todavía no hay sucursales. Subí el Excel o agregalas una por una.</div>'}
     </div>`, 'Clientes a visitar');
@@ -120,7 +122,7 @@ async function guardarCampo(input) {
     Object.assign(c, r.client);
     input.classList.add('saved');
     setTimeout(() => input.classList.remove('saved'), 1500);
-    if (f === 'zona') renderClientes();
+    if (['zona', 'link', 'codigo', 'direccion'].includes(f)) { if (f === 'codigo' || f === 'link') P.clients = await api('/api/clients'); renderClientes(); }
   } catch (err) {
     input.value = c[f] ?? '';
     input.classList.add('bad');
@@ -146,7 +148,8 @@ function nuevaSucursal() {
       <label class="f">Dirección<input name="direccion"></label>
       <label class="f">Zona<input name="zona" list="dl-z2" required></label><datalist id="dl-z2">${zonas.map((z) => `<option value="${esc(z)}">`).join('')}</datalist>
       <label class="f">Horario (opcional)<input name="horario" placeholder="10:00-12:00"></label>
-      <label class="f">Link de Google Maps<input name="link" required placeholder="https://maps.app.goo.gl/…"></label>
+      <label class="f">Código ventas (opcional, solo Disco, Devoto o Geant)<input name="codigo" placeholder="ej.: DISCO27"></label>
+      <label class="f">Link de Google Maps (opcional: sin link se ubica por la dirección)<input name="link" placeholder="https://maps.app.goo.gl/…"></label>
       <div class="err" id="fn-e" hidden></div>
       <div style="display:flex;gap:10px;justify-content:flex-end"><button type="button" class="btn" data-close>Cancelar</button><button class="btn dark" id="fn-b">Guardar</button></div>
     </form>`);
@@ -165,7 +168,7 @@ function nuevaSucursal() {
 }
 
 async function previewImport(file) {
-  const bg = modal('<h2>Revisando el archivo…</h2><div class="muted">Leyendo filas y ubicaciones de Google Maps.</div>');
+  const bg = modal('<h2>Revisando el archivo…</h2><div class="muted">Leyendo filas y ubicaciones. Si hay sucursales sin link de Maps, el sistema las busca por dirección: puede tardar 1 o 2 minutos la primera vez.</div>');
   const fd = new FormData();
   fd.append('archivo', file);
   let p;
@@ -180,6 +183,7 @@ async function previewImport(file) {
       <div class="card kpi"><div class="v">${p.sinCambios}</div><div class="l">Ya estaban igual</div></div>
       <div class="card kpi"><div class="v" style="color:${p.errores.length ? 'var(--orange)' : 'inherit'}">${p.errores.length}</div><div class="l">Con errores</div></div>
     </div>
+    ${p.aprox ? `<div class="muted" style="font-size:14px">${p.aprox} ${p.aprox === 1 ? 'sucursal se ubicó' : 'sucursales se ubicaron'} por dirección (aproximado). En la tabla quedan marcadas con ≈; si alguna queda mal, pegale el link de Google Maps.</div>` : ''}
     ${p.repetidasArchivo ? `<div class="muted" style="font-size:14px">${p.repetidasArchivo} ${p.repetidasArchivo === 1 ? 'fila estaba repetida' : 'filas estaban repetidas'} dentro del archivo: queda una sola.</div>` : ''}
     ${n ? `<div><strong>Nuevas</strong>${lista(p.nuevas, (r) => `<div><span class="badge ${r.empresa}">${r.empresa}</span> ${esc(r.nombre)} · <span class="muted">${esc(r.zona)}</span></div>`)}</div>` : ''}
     ${a ? `<div><strong>Se actualizan</strong>${lista(p.actualizadas, (r) => `<div>${esc(r.nombre)} · <span class="muted">${r.reactivar ? 'se vuelve a activar' : 'cambia: ' + esc(r.cambios.join(', '))}</span></div>`)}</div>` : ''}
@@ -200,6 +204,65 @@ async function previewImport(file) {
   });
 }
 
+// ---------- Planilla de ventas (Disco, Devoto, Geant) ----------
+function pillUrg(u, siempre) {
+  if (!u) return siempre ? '<span class="muted">—</span>' : '';
+  if (!u.nivel) return siempre ? `<span class="pill ok">Venta hace ${u.dias} d</span>` : '';
+  return `<span class="pill ${u.nivel === 'alta' ? 'warn' : 'idle'}" title="${esc(u.ultima ? 'Última venta: ' + u.ultima : '')}">${u.dias == null ? 'Sin ventas registradas' : `Sin ventas hace ${u.dias} d`}</span>`;
+}
+
+function fechaCorta(iso) { return iso ? new Date(iso).toLocaleDateString('es-UY', { timeZone: TZ }) : ''; }
+
+function tarjetaVentas() {
+  const V = P.ventas || {};
+  return `<div class="card" style="padding:22px;display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between">
+    <div style="display:flex;flex-direction:column;gap:6px;max-width:720px">
+      <div style="font-size:17px;font-weight:600">Planilla de ventas · Disco, Devoto y Geant</div>
+      <div style="font-size:14px;color:var(--muted)">Con la planilla de facturas, los supermercados sin ventas hace 30 días o más se sugieren primero cuando el vendedor elige su zona (después de los que quedaron pendientes). El orden de la recorrida no cambia. Cada sucursal se vincula por su <strong>código de ventas</strong> (ej.: DISCO27, DEV3005, GEANT1).</div>
+      <div style="font-size:14px">${V.actualizado ? `Última carga: <strong>${esc(fechaCorta(V.actualizado))}</strong> · ${esc(V.archivo || '')} · ${V.vinculadas} de ${V.total} sucursales vinculadas` : '<span class="muted">Todavía no se cargó ninguna planilla.</span>'}</div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px">
+      ${V.sin_vincular?.length ? `<button class="btn" data-act="sinvinc">Sin vincular (${V.sin_vincular.length})</button>` : ''}
+      <label class="btn dark">Subir planilla de ventas<input type="file" id="ventas" accept=".xlsx,.xlsm" class="sr"></label>
+    </div>
+  </div>`;
+}
+
+function listaSinVincular(arr) {
+  return `<div class="list-sm" style="max-height:320px">${arr.map((v) => `<div style="display:flex;gap:10px;justify-content:space-between;flex-wrap:wrap">
+    <span><span class="mono" style="font-weight:500">${esc(v.codigo)}</span> · ${esc(v.cadena)} ${esc(v.nombre)}</span>
+    <span class="muted" style="font-size:13px">última venta ${esc(v.ultima)} (${v.dias} d)</span></div>`).join('')}</div>`;
+}
+
+function verSinVincular() {
+  const V = P.ventas;
+  modal(`<h2>Sucursales de la planilla sin vincular</h2>
+    <div style="font-size:14px;color:var(--ink2)">Estas sucursales de Disco, Devoto y Geant no están asociadas a ningún cliente. Si alguna es parte de las recorridas, escribí su código en la columna <strong>Código ventas</strong> de la tabla (o en el Excel de clientes). Si no se visita, podés ignorarla.</div>
+    ${listaSinVincular(V.sin_vincular)}
+    <div style="text-align:right"><button class="btn" data-close>Cerrar</button></div>`);
+}
+
+async function subirVentas(file) {
+  const bg = modal('<h2>Leyendo la planilla de ventas…</h2><div class="muted">Puede tardar unos segundos.</div>');
+  const fd = new FormData();
+  fd.append('archivo', file);
+  try {
+    const r = await api('/api/ventas', { method: 'POST', body: fd });
+    P.ventas = r;
+    const cad = Object.entries(r.porCadena).map(([k, v]) => `${v} de ${k}`).join(', ');
+    bg.querySelector('.modal').innerHTML = `<h2>Planilla de ventas cargada</h2>
+      <div class="okmsg">${r.total} sucursales con ventas (${esc(cad)}). ${r.vinculadas} vinculadas a clientes de las recorridas.</div>
+      ${r.autoVinculadas.length ? `<div><strong>Vinculadas automáticamente por nombre</strong><div class="list-sm">${r.autoVinculadas.map((a) => `<div>${esc(a.nombre)} → <span class="mono">${esc(a.codigo)}</span></div>`).join('')}</div></div>` : ''}
+      <div style="font-size:15px">${r.urgentes ? `<strong>${r.urgentes}</strong> ${r.urgentes === 1 ? 'supermercado aparece' : 'supermercados aparecen'} con prioridad por no tener ventas hace 30 días o más.` : 'Ningún supermercado vinculado tiene ventas atrasadas.'}</div>
+      ${r.sin_vincular.length ? `<div><strong>Sin vincular (${r.sin_vincular.length})</strong> <span class="muted" style="font-size:14px">— si alguna se visita, poné su código en la columna "Código ventas".</span>${listaSinVincular(r.sin_vincular)}</div>` : ''}
+      <div style="text-align:right"><button class="btn dark" data-close>Listo</button></div>`;
+    P.clients = await api('/api/clients');
+    renderClientes();
+  } catch (err) {
+    bg.querySelector('.modal').innerHTML = `<h2>No se pudo cargar</h2><div class="err">${esc(err.message)}</div><div style="text-align:right"><button class="btn" data-close>Cerrar</button></div>`;
+  }
+}
+
 // ---------- Zonas ----------
 function renderZonas() {
   const Z = P.zonas;
@@ -210,13 +273,14 @@ function renderZonas() {
       ${Z.zonas.map((z) => `<button class="zcard" data-act="zsel" data-z="${esc(z.zona)}" aria-pressed="${z.zona === P.zonaSel}">
         <div style="display:flex;justify-content:space-between;align-items:baseline;width:100%"><span style="font-size:17px;font-weight:600">${esc(z.zona)}</span><span class="mono">${z.visitadas}/${z.total}</span></div>
         <div class="zbar" style="width:100%"><div style="width:${z.visitadas / z.total * 100}%;background:var(--green)"></div><div style="width:${z.postergadas / z.total * 100}%;background:var(--orange-mid)"></div></div>
-        <div style="font-size:13px;color:var(--ink2)">${z.visitadas} visitadas · ${z.postergadas} pendientes de la vez anterior · ${z.pendientes} sin visitar</div></button>`).join('')}
+        <div style="font-size:13px;color:var(--ink2)">${z.visitadas} visitadas · ${z.postergadas} pendientes de la vez anterior · ${z.pendientes} sin visitar</div>
+        ${z.urgentes ? `<div><span class="pill warn">${z.urgentes} ${z.urgentes === 1 ? 'supermercado' : 'supermercados'} sin ventas hace tiempo</span></div>` : ''}</button>`).join('')}
       <div class="legend"><span><i class="dot" style="background:#1F6B4F;margin:0"></i>Visitada este mes</span><span><i class="dot" style="background:#D9875A;margin:0"></i>Quedó pendiente</span><span><i class="dot" style="background:#fff;border:1.5px solid #5B635E;margin:0"></i>Sin visitar</span></div>
     </div>
     <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:14px">
       <div id="map" class="map" aria-label="Mapa de ${esc(P.zonaSel)}"></div>
-      <div class="card tbl"><table><thead><tr><th>Sucursal</th><th>Empresa</th><th>Estado en ${esc(nombreMes(Z.mes))}</th><th>Última visita</th></tr></thead><tbody>
-        ${suc.map((s) => `<tr><td style="font-weight:600">${esc(s.nombre)}</td><td><span class="badge ${s.empresa}">${s.empresa}</span></td><td><span class="pill ${ST[s.status].cls}">${ST[s.status].l}</span></td>
+      <div class="card tbl"><table><thead><tr><th>Sucursal</th><th>Empresa</th><th>Estado en ${esc(nombreMes(Z.mes))}</th><th>Ventas</th><th>Última visita</th></tr></thead><tbody>
+        ${suc.map((s) => `<tr><td style="font-weight:600">${esc(s.nombre)}</td><td><span class="badge ${s.empresa}">${s.empresa}</span></td><td><span class="pill ${ST[s.status].cls}">${ST[s.status].l}</span></td><td>${pillUrg(s.urgencia, true)}</td>
         <td class="mono" style="font-size:14px">${s.last_visit_at ? `${new Date(s.last_visit_at).toLocaleDateString('es-UY', { timeZone: TZ })} ${hora(s.last_visit_at)} · ${s.last_result === 'si' ? 'SÍ' : 'NO'}` : '—'}</td></tr>`).join('')}
       </tbody></table></div>
     </div></div>` : '<div class="card muted" style="padding:30px;text-align:center">Todavía no hay sucursales cargadas.</div>', `Zonas en ${nombreMes(Z.mes)}`);
@@ -348,6 +412,7 @@ wrap.addEventListener('click', async (e) => {
     else if (act === 'clave') cambiarClave();
     else if (act === 'fz') { P.filtroZona = el.dataset.z; renderClientes(); }
     else if (act === 'nueva') nuevaSucursal();
+    else if (act === 'sinvinc') verSinVincular();
     else if (act === 'borrar') {
       const id = Number(el.closest('tr').dataset.id);
       const c = P.clients.find((x) => x.id === id);
@@ -370,6 +435,7 @@ wrap.addEventListener('click', async (e) => {
 wrap.addEventListener('change', (e) => {
   const t = e.target;
   if (t.id === 'xls' && t.files[0]) { previewImport(t.files[0]); t.value = ''; }
+  else if (t.id === 'ventas' && t.files[0]) { subirVentas(t.files[0]); t.value = ''; }
   else if (t.id === 'fe') { P.filtroEmpresa = t.value; renderClientes(); }
   else if (t.dataset.f) guardarCampo(t);
 });
