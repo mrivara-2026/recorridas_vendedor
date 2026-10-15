@@ -43,7 +43,7 @@ async function abrir(tab) {
   if (mapa) { mapa.remove(); mapa = null; }
   try {
     if (tab === 'clientes') { [P.clients, P.ventas] = await Promise.all([api('/api/clients'), isAdmin() ? api('/api/ventas') : null]); renderClientes(); }
-    else if (tab === 'zonas') { P.zonas = await api('/api/zones'); if (!P.zonas.zonas.find((z) => z.zona === P.zonaSel)) P.zonaSel = P.zonas.zonas[0]?.zona || null; renderZonas(); }
+    else if (tab === 'zonas') { [P.zonas, P.grupos] = await Promise.all([api('/api/zones'), api('/api/grupos')]); if (!P.zonas.zonas.find((z) => z.zona === P.zonaSel)) P.zonaSel = P.zonas.zonas[0]?.zona || null; renderZonas(); }
     else if (tab === 'visitas') { await cargarVisitas(); }
     else if (tab === 'control') { if (!P.usuarios.length) P.usuarios = (await api('/api/users')).filter((u) => u.role === 'vendedor'); if (!P.cUsuario && P.usuarios[0]) P.cUsuario = String(P.usuarios[0].id); await cargarControl(); }
   } catch (err) { toast(err.message, 5000); }
@@ -88,7 +88,7 @@ function renderClientes() {
       <span class="muted" style="font-size:14px">${rows.length} de ${P.clients.length} sucursales</span>
     </div>
     <div class="card tbl">
-      ${P.clients.length ? `<table><thead><tr><th>Empresa</th><th>Nombre</th><th>Dirección</th><th>Zona</th><th>Código ventas</th><th>Horario</th><th>Link Google Maps</th><th>Este mes</th><th><span class="sr">Acciones</span></th></tr></thead><tbody>
+      ${P.clients.length ? `<table><thead><tr><th>Empresa</th><th>Nombre</th><th>Dirección</th><th>Barrio</th><th>Código ventas</th><th>Horario</th><th>Link Google Maps</th><th>Este mes</th><th><span class="sr">Acciones</span></th></tr></thead><tbody>
       ${rows.map((c) => `<tr data-id="${c.id}">
         <td><select aria-label="Empresa" data-f="empresa"><option ${c.empresa === 'BEC' ? 'selected' : ''}>BEC</option><option ${c.empresa === 'MAN' ? 'selected' : ''}>MAN</option></select></td>
         <td><input aria-label="Nombre" data-f="nombre" value="${esc(c.nombre)}" style="width:230px"></td>
@@ -263,12 +263,46 @@ async function subirVentas(file) {
   }
 }
 
+// ---------- Zonas de recorrida (barrios agrupados) ----------
+function tarjetaGrupos() {
+  const G = P.grupos || { grupos: [] };
+  const nombres = G.grupos.map((g) => g.grupo);
+  const abierto = P.gruposAbierto || !G.agrupado;
+  return `<details class="card" id="gdet" ${abierto ? 'open' : ''} style="padding:0">
+    <summary style="padding:16px 20px;cursor:pointer;font-size:16px;font-weight:600">Zonas de recorrida · ${G.grupos.length} zonas${G.agrupado ? '' : ' (todavía sin agrupar barrios)'}</summary>
+    <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;align-items:flex-end">
+      <div style="display:flex;flex-direction:column;gap:4px;max-width:640px">
+        <div style="font-size:14px;color:var(--muted)">El vendedor elige una zona en el celular. Cada zona puede juntar varios barrios cercanos. Podés agrupar automáticamente y después mover barrios o cambiar el nombre de cada zona.</div>
+      </div>
+      <div class="fil">
+        <label for="gkm" class="muted" style="font-size:14px">Juntar barrios a menos de</label>
+        <select id="gkm">${[2, 3, 4, 5, 8].map((k) => `<option value="${k}" ${k === (P.gkm || 3) ? 'selected' : ''}>${k} km</option>`).join('')}</select>
+        <button class="btn dark" data-act="gauto">Agrupar barrios cercanos</button>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">
+      ${G.grupos.map((g) => `<div style="border:1px solid var(--line2);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px">
+        <label class="sr" for="gn-${esc(g.grupo)}">Nombre de la zona</label>
+        <input id="gn-${esc(g.grupo)}" data-grupo-nombre="${esc(g.grupo)}" value="${esc(g.grupo)}" style="height:38px;border:1px solid var(--line2);border-radius:8px;padding:0 10px;font-size:15px;font-weight:600">
+        ${g.barrios.map((b) => `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:14px">
+          <span>${esc(b.barrio)} <span class="muted">(${b.n})</span></span>
+          <select aria-label="Mover ${esc(b.barrio)} a otra zona" data-mover="${esc(b.barrio)}" style="height:32px;border:1px solid var(--line2);border-radius:8px;font-size:13px;max-width:150px">
+            <option value="">Mover a…</option>
+            ${nombres.filter((n) => n !== g.grupo).map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}
+            ${g.barrios.length > 1 ? `<option value="__propia">Zona propia</option>` : ''}
+          </select></div>`).join('')}
+      </div>`).join('')}
+    </div>
+  </div></details>`;
+}
+
 // ---------- Zonas ----------
 function renderZonas() {
   const Z = P.zonas;
   const sel = Z.zonas.find((z) => z.zona === P.zonaSel);
-  const suc = Z.sucursales.filter((s) => s.zona === P.zonaSel).sort((a, b) => ({ postergada: 0, pendiente: 1, visitada: 2 }[a.status] - { postergada: 0, pendiente: 1, visitada: 2 }[b.status]));
-  wrap.innerHTML = shell(Z.zonas.length ? `<div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">
+  const suc = Z.sucursales.filter((s) => s.grupo === P.zonaSel).sort((a, b) => ({ postergada: 0, pendiente: 1, visitada: 2 }[a.status] - { postergada: 0, pendiente: 1, visitada: 2 }[b.status]));
+  wrap.innerHTML = shell(Z.zonas.length ? `${tarjetaGrupos()}<div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">
     <div style="flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:10px">
       ${Z.zonas.map((z) => `<button class="zcard" data-act="zsel" data-z="${esc(z.zona)}" aria-pressed="${z.zona === P.zonaSel}">
         <div style="display:flex;justify-content:space-between;align-items:baseline;width:100%"><span style="font-size:17px;font-weight:600">${esc(z.zona)}</span><span class="mono">${z.visitadas}/${z.total}</span></div>
@@ -279,14 +313,14 @@ function renderZonas() {
     </div>
     <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:14px">
       <div id="map" class="map" aria-label="Mapa de ${esc(P.zonaSel)}"></div>
-      <div class="card tbl"><table><thead><tr><th>Sucursal</th><th>Empresa</th><th>Estado en ${esc(nombreMes(Z.mes))}</th><th>Ventas</th><th>Última visita</th></tr></thead><tbody>
-        ${suc.map((s) => `<tr><td style="font-weight:600">${esc(s.nombre)}</td><td><span class="badge ${s.empresa}">${s.empresa}</span></td><td><span class="pill ${ST[s.status].cls}">${ST[s.status].l}</span></td><td>${pillUrg(s.urgencia, true)}</td>
+      <div class="card tbl"><table><thead><tr><th>Sucursal</th><th>Barrio</th><th>Empresa</th><th>Estado en ${esc(nombreMes(Z.mes))}</th><th>Ventas</th><th>Última visita</th></tr></thead><tbody>
+        ${suc.map((s) => `<tr><td style="font-weight:600">${esc(s.nombre)}</td><td style="font-size:14px">${esc(s.zona)}</td><td><span class="badge ${s.empresa}">${s.empresa}</span></td><td><span class="pill ${ST[s.status].cls}">${ST[s.status].l}</span></td><td>${pillUrg(s.urgencia, true)}</td>
         <td class="mono" style="font-size:14px">${s.last_visit_at ? `${new Date(s.last_visit_at).toLocaleDateString('es-UY', { timeZone: TZ })} ${hora(s.last_visit_at)} · ${s.last_result === 'si' ? 'SÍ' : 'NO'}` : '—'}</td></tr>`).join('')}
       </tbody></table></div>
     </div></div>` : '<div class="card muted" style="padding:30px;text-align:center">Todavía no hay sucursales cargadas.</div>', `Zonas en ${nombreMes(Z.mes)}`);
   if (sel && window.L) {
     mapa = L.map('map', { scrollWheelZoom: false });
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(mapa);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(mapa);
     const pts = [];
     suc.forEach((s) => {
       if (s.lat == null) return;
@@ -388,7 +422,7 @@ function renderControl() {
   document.getElementById('cu').addEventListener('change', (e) => { P.cUsuario = e.target.value; cargarControl().catch((er) => toast(er.message)); });
   if (R && C.puntos.length && window.L) {
     mapa = L.map('map', { scrollWheelZoom: false });
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(mapa);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(mapa);
     const ll = C.puntos.map((p) => [p.lat, p.lng]);
     L.polyline(ll, { color: '#17201B', weight: 2, dashArray: '6 6' }).addTo(mapa);
     let n = 0;
@@ -413,6 +447,17 @@ wrap.addEventListener('click', async (e) => {
     else if (act === 'fz') { P.filtroZona = el.dataset.z; renderClientes(); }
     else if (act === 'nueva') nuevaSucursal();
     else if (act === 'sinvinc') verSinVincular();
+    else if (act === 'gauto') {
+      P.gkm = Number(document.getElementById('gkm').value);
+      P.gruposAbierto = true;
+      const ya = P.grupos?.agrupado;
+      if (!ya || await confirmar('¿Volver a agrupar?', 'Se arman las zonas de nuevo según la distancia elegida. Los cambios manuales de zonas se pierden.', 'Agrupar')) {
+        const r = await api('/api/grupos/auto', { json: { km: P.gkm } });
+        toast(`Listo: ${r.zonas} zonas de recorrida.`);
+        P.zonaSel = null;
+        await abrir('zonas');
+      }
+    }
     else if (act === 'borrar') {
       const id = Number(el.closest('tr').dataset.id);
       const c = P.clients.find((x) => x.id === id);
@@ -438,6 +483,15 @@ wrap.addEventListener('change', (e) => {
   else if (t.id === 'ventas' && t.files[0]) { subirVentas(t.files[0]); t.value = ''; }
   else if (t.id === 'fe') { P.filtroEmpresa = t.value; renderClientes(); }
   else if (t.dataset.f) guardarCampo(t);
+  else if (t.dataset.mover !== undefined && t.value) {
+    P.gruposAbierto = true;
+    const grupo = t.value === '__propia' ? '' : t.value;
+    api('/api/grupos/mover', { json: { barrio: t.dataset.mover, grupo } }).then(() => abrir('zonas')).catch((e) => toast(e.message));
+  } else if (t.dataset.grupoNombre !== undefined) {
+    P.gruposAbierto = true;
+    const a = t.value.trim();
+    if (a && a !== t.dataset.grupoNombre) api('/api/grupos/renombrar', { json: { de: t.dataset.grupoNombre, a } }).then(() => { P.zonaSel = a; return abrir('zonas'); }).catch((e) => toast(e.message));
+  }
 });
 
 function cambiarClave() {

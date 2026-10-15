@@ -24,7 +24,7 @@ app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 app.use((req, res, next) => {
   res.set('X-Content-Type-Options', 'nosniff');
-  res.set('Referrer-Policy', 'same-origin');
+  res.set('Referrer-Policy', 'strict-origin-when-cross-origin'); // el mapa (OpenStreetMap) exige saber desde qué sitio se pide
   res.set('Permissions-Policy', 'geolocation=(self), camera=(self)');
   next();
 });
@@ -131,13 +131,101 @@ async function clientStatuses() {
     FROM clients c LEFT JOIN ventas ve ON ve.codigo = c.codigo AND c.codigo <> ''
     WHERE c.active = 1 ORDER BY lower(c.zona), lower(c.nombre)`, { ms });
   const hayVentas = !!(await db.get('SELECT codigo FROM ventas LIMIT 1'));
+  const grupos = await mapaGrupos();
   return rows.map((c) => {
     let status = 'pendiente';
     if (c.visited_at) status = 'visitada';
     else if (c.last_item_status === 'no' || c.last_item_status === 'skipped') status = 'postergada';
     return { ...c, status, urgencia: hayVentas ? urgencia(c) : null };
-  });
+  }).map((c) => ({ ...c, grupo: grupos.get(X.norm(c.zona)) || c.zona }));
 }
+
+// ---------- Zonas de recorrida: barrios cercanos agrupados ----------
+async function mapaGrupos() {
+  return new Map((await db.all('SELECT barrio, grupo FROM zona_grupos')).map((r) => [r.barrio, r.grupo]));
+}
+
+function barriosDe(st) {
+  const b = new Map();
+  for (const c of st) {
+    const k = X.norm(c.zona);
+    const e = b.get(k) || { key: k, barrio: c.zona, n: 0, lat: 0, lng: 0, conUbic: 0, grupo: c.grupo };
+    e.n++;
+    if (c.lat != null) { e.lat += c.lat; e.lng += c.lng; e.conUbic++; }
+    b.set(k, e);
+  }
+  return [...b.values()].map((e) => ({ ...e, lat: e.conUbic ? e.lat / e.conUbic : null, lng: e.conUbic ? e.lng / e.conUbic : null }));
+}
+
+function nombreGrupo(miembros) {
+  const m = [...miembros].sort((a, b) => b.n - a.n || a.barrio.localeCompare(b.barrio, 'es'));
+  const tops = m.slice(0, 3).map((x) => x.barrio);
+  return tops.join(' · ') + (m.length > 3 ? ` +${m.length - 3}` : '');
+}
+
+// Junta barrios cuyo centro está a menos de km entre sí (agrupamiento jerárquico, sin grupos estirados)
+function agrupar(barrios, km) {
+  let cl = barrios.filter((b) => b.lat != null).map((b) => ({ m: [b], lat: b.lat, lng: b.lng, n: b.n }));
+  const diam = (a, b) => Math.max(...a.m.flatMap((x) => b.m.map((y) => geo.km(x, y))));
+  for (;;) {
+    let best = null;
+    for (let i = 0; i < cl.length; i++) for (let j = i + 1; j < cl.length; j++) {
+      const d = geo.km(cl[i], cl[j]);
+      if (d <= km && diam(cl[i], cl[j]) <= km * 1.6 && (!best || d < best.d)) best = { i, j, d };
+    }
+    if (!best) break;
+    const a = cl[best.i], b = cl[best.j], n = a.n + b.n;
+    const nuevo = { m: [...a.m, ...b.m], n, lat: (a.lat * a.n + b.lat * b.n) / n, lng: (a.lng * a.n + b.lng * b.n) / n };
+    cl = cl.filter((_, k) => k !== best.i && k !== best.j).concat([nuevo]);
+  }
+  const sinUbic = barrios.filter((b) => b.lat == null).map((b) => ({ m: [b] }));
+  return [...cl, ...sinUbic].map((c) => ({ grupo: nombreGrupo(c.m), barrios: c.m }));
+}
+
+app.get('/api/grupos', auth(), async (req, res) => {
+  const bs = barriosDe(await clientStatuses());
+  const g = new Map();
+  for (const b of bs) { const e = g.get(b.grupo) || { grupo: b.grupo, n: 0, barrios: [] }; e.n += b.n; e.barrios.push({ barrio: b.barrio, n: b.n }); g.set(b.grupo, e); }
+  res.json({ grupos: [...g.values()].sort((a, b) => a.grupo.localeCompare(b.grupo, 'es')), agrupado: !!(await db.get('SELECT barrio FROM zona_grupos LIMIT 1')) });
+});
+
+app.post('/api/grupos/auto', auth(), async (req, res) => {
+  const km = Math.max(0.5, Math.min(30, Number(req.body?.km) || 3));
+  const gs = agrupar(barriosDe(await clientStatuses()), km);
+  await db.tx(async (t) => {
+    await t.run('DELETE FROM zona_grupos');
+    for (const g of gs) for (const b of g.barrios) if (g.barrios.length > 1) await t.run('INSERT INTO zona_grupos (barrio, grupo) VALUES (?, ?)', [b.key, g.grupo]);
+  });
+  res.json({ zonas: gs.length, agrupadas: gs.filter((g) => g.barrios.length > 1).length });
+});
+
+app.post('/api/grupos/mover', auth(), async (req, res) => {
+  const barrio = String(req.body?.barrio || '').trim();
+  const grupo = String(req.body?.grupo || '').trim();
+  if (!barrio) return res.status(400).json({ error: 'Falta el barrio.' });
+  const antes = await db.get('SELECT grupo FROM zona_grupos WHERE barrio = ?', [X.norm(barrio)]);
+  await db.run('DELETE FROM zona_grupos WHERE barrio = ?', [X.norm(barrio)]);
+  if (grupo && X.norm(grupo) !== X.norm(barrio)) {
+    // si la zona destino era un barrio solo (sin agrupar), ese barrio pasa a formar parte de la zona
+    const solo = await db.get('SELECT barrio FROM zona_grupos WHERE grupo = ?', [grupo]);
+    if (!solo) await db.run('INSERT INTO zona_grupos (barrio, grupo) VALUES (?, ?) ON CONFLICT (barrio) DO NOTHING', [X.norm(grupo), grupo]);
+    await db.run('INSERT INTO zona_grupos (barrio, grupo) VALUES (?, ?)', [X.norm(barrio), grupo]);
+  }
+  // si la zona de origen quedó con un solo barrio y tenía nombre automático ("A · B"), vuelve a llamarse como el barrio
+  if (antes) {
+    const resto = await db.all('SELECT barrio FROM zona_grupos WHERE grupo = ?', [antes.grupo]);
+    if (resto.length === 1 && antes.grupo.includes(' · ')) await db.run('DELETE FROM zona_grupos WHERE grupo = ?', [antes.grupo]);
+  }
+  res.json({ ok: true });
+});
+
+app.post('/api/grupos/renombrar', auth(), async (req, res) => {
+  const de = String(req.body?.de || '').trim(), a = String(req.body?.a || '').trim();
+  if (!de || !a) return res.status(400).json({ error: 'El nombre de la zona no puede quedar vacío.' });
+  const r = await db.run('UPDATE zona_grupos SET grupo = ? WHERE grupo = ?', [a, de]);
+  if (!r.changes) await db.run('INSERT INTO zona_grupos (barrio, grupo) VALUES (?, ?) ON CONFLICT (barrio) DO UPDATE SET grupo = excluded.grupo', [X.norm(de), a]);
+  res.json({ ok: true });
+});
 
 // Urgencia de venta (Disco, Devoto, Geant): días desde la última factura de esa sucursal
 const URG_ALTA = Number(process.env.URGENCIA_ALTA_DIAS || 45);
@@ -353,7 +441,7 @@ app.get('/api/zones', auth(), async (req, res) => {
   const st = await clientStatuses();
   const zones = {};
   for (const c of st) {
-    const z = zones[c.zona] || (zones[c.zona] = { zona: c.zona, total: 0, visitadas: 0, postergadas: 0, pendientes: 0, urgentes: 0 });
+    const z = zones[c.grupo] || (zones[c.grupo] = { zona: c.grupo, total: 0, visitadas: 0, postergadas: 0, pendientes: 0, urgentes: 0 });
     z.total++;
     if (c.status === 'visitada') z.visitadas++; else if (c.status === 'postergada') z.postergadas++; else z.pendientes++;
     if (c.status !== 'visitada' && c.urgencia?.nivel) z.urgentes++;
@@ -361,7 +449,7 @@ app.get('/api/zones', auth(), async (req, res) => {
   res.json({
     mes: T.currentMonth(),
     zonas: Object.values(zones).sort((a, b) => a.zona.localeCompare(b.zona, 'es')),
-    sucursales: st.map((c) => ({ ...publicClient(c), status: c.status, visited_at: c.visited_at, last_visit_at: c.last_visit_at, last_result: c.last_result, urgencia: c.urgencia }))
+    sucursales: st.map((c) => ({ ...publicClient(c), grupo: c.grupo, status: c.status, visited_at: c.visited_at, last_visit_at: c.last_visit_at, last_result: c.last_result, urgencia: c.urgencia }))
   });
 });
 
@@ -432,7 +520,7 @@ function openPlan(userId) {
 function num(v) { const n = Number(v); return v === null || v === undefined || v === '' || !Number.isFinite(n) ? null : n; }
 
 async function candidatesFor(zona) {
-  return (await clientStatuses()).filter((c) => c.zona === zona && c.status !== 'visitada')
+  return (await clientStatuses()).filter((c) => c.grupo === zona && c.status !== 'visitada')
     .map((c) => ({ ...c, postponed: c.status === 'postergada', urgent: !!c.urgencia?.nivel, urgentDays: c.urgencia ? (c.urgencia.dias ?? 99999) : 0 }));
 }
 
@@ -442,7 +530,7 @@ app.get('/api/plan/options', auth('vendedor', 'admin'), async (req, res) => {
   const st = await clientStatuses();
   const zones = {};
   for (const c of st) {
-    const z = zones[c.zona] || (zones[c.zona] = { zona: c.zona, total: 0, visitadas: 0, postergadas: 0, disponibles: 0, urgentes: 0 });
+    const z = zones[c.grupo] || (zones[c.grupo] = { zona: c.grupo, total: 0, visitadas: 0, postergadas: 0, disponibles: 0, urgentes: 0 });
     z.total++;
     if (c.status === 'visitada') z.visitadas++;
     else { z.disponibles++; if (c.status === 'postergada') z.postergadas++; if (c.urgencia?.nivel) z.urgentes++; }
@@ -559,12 +647,13 @@ async function visitRows(q, role) {
   const where = ['1=1'];
   const p = {};
   if (q.mes && /^\d{4}-\d{2}$/.test(q.mes)) { const [a, b] = T.monthRangeUTC(q.mes); where.push('v.arrived_at >= @a AND v.arrived_at < @b'); p.a = a; p.b = b; }
-  if (q.zona) { where.push('c.zona = @zona'); p.zona = q.zona; }
+
   if (q.resultado === 'si' || q.resultado === 'no') { where.push('v.result = @res'); p.res = q.resultado; }
   const rows = await db.all(`SELECT v.*, c.empresa, c.nombre, c.direccion, c.zona, c.lat AS c_lat, c.lng AS c_lng, u.username
     FROM visits v JOIN clients c ON c.id = v.client_id JOIN users u ON u.id = v.user_id
     WHERE ${where.join(' AND ')} ORDER BY v.arrived_at DESC LIMIT 5000`, p);
-  return rows.map((r) => {
+  const grupos = await mapaGrupos();
+  return rows.map((r) => ({ ...r, grupo: grupos.get(X.norm(r.zona)) || r.zona })).filter((r) => !q.zona || r.grupo === q.zona).map((r) => {
     const base = {
       id: r.id, fecha: T.localDateTime(r.arrived_at), arrived_at: r.arrived_at, zona: r.zona, empresa: r.empresa, sucursal: r.nombre, direccion: r.direccion,
       resultado: r.result === 'si' ? 'SÍ' : 'NO', comentario: r.comment, vendedor: r.username,
