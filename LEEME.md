@@ -1,88 +1,83 @@
-# Recorridas — guía de instalación y uso
+# Sistema de visitas — guía de instalación y uso (versión 2)
 
-Sistema para las recorridas del vendedor:
+Sistema de visitas del vendedor de Platero, para Serrana (Manirux) y Becarey:
 
-- **App del celular** (`/app`): el vendedor elige zona y cantidad de visitas, sigue la recorrida sugerida, marca SÍ/NO (se guardan hora y ubicación), saca la foto (local o góndola), deja comentarios y termina la jornada (se guarda la ubicación de cierre).
-- **Panel web** (`/panel`): clientes (tabla editable + importación de Excel sin duplicados), zonas del mes con mapa, base de visitas con exportación a Excel y, solo para el administrador, **control de jornada**.
+- **Panel web** (`/panel`): el jefe comercial arma la semana del vendedor eligiendo barrios; el sistema suma los barrios linderos y sugiere primero las sucursales del grupo Disco con caída de ventas, después las visitas que quedaron pendientes y después los comercios a los que les toca visita por frecuencia. También: comercios, ventas Serrana, visitas, dashboard con alertas, control de jornada y configuración de barrios y listas.
+- **App del celular** (`/app`): el vendedor ve lo que tiene hoy y en la semana, inicia la jornada (se ordena el recorrido desde donde está), completa el formulario de cada visita (SÍ/NO, motivo si fue NO, foto, comentarios estándar, comentario libre y, en prospectos, cuándo volver o si pasó a cliente), agrega urgencias (le avisan al jefe) y termina la jornada.
 
-## Usuarios iniciales
+## Qué cambió respecto de la versión 1
+
+| Versión 1 | Versión 2 |
+|---|---|
+| El vendedor elegía zona y cantidad cada mañana | El administrador arma y publica la semana. El vendedor igual puede armar una recorrida en un barrio si no tiene visitas asignadas |
+| Cada sucursal una vez por mes | Frecuencia por comercio: Serrana 2 o 3 por año, Cliente BEC 1 o 2, Prospecto BEC según lo que pidió |
+| Zonas aisladas | Barrios con sus linderos (editables en *Barrios y listas*) |
+| Solo BEC o MAN | Tipos: Serrana, Cliente BEC, Prospecto BEC (y cadena: Grupo Disco, Tienda Inglesa, Otra) |
+| Sin datos de ventas | Carga de la *Consulta Factura Sucursal* de GIA y regla de caída del grupo Disco |
+| Comentario libre | Motivo del NO, comentarios estándar por tipo y comentario libre |
+| El link de Google Maps era obligatorio | Es opcional: sin link, el sistema ubica el comercio por su dirección (OpenStreetMap) |
+| — | Urgencias, alertas para el jefe y dashboard (cumplimiento, visitas por semana, horas, prospectos a cliente) |
+
+La base de datos de la versión 1 se actualiza sola al arrancar: no se pierde nada. Los comercios MAN pasan a Serrana (3 visitas por año) y los BEC a Cliente BEC (2 por año).
+
+### Regla de caída de ventas (grupo Disco)
+
+Una sucursal de Disco, Devoto, Devoto Express o Geant (Ameluz, Odaler) es prioridad si:
+
+1. en los últimos 90 días vendió 30% o menos que en los mismos 90 días del año anterior (packs, descontando notas de crédito), o
+2. pasó más del doble del tiempo que suele tardar entre una compra y la siguiente.
+
+Se calcula a la última fecha de la planilla de ventas. Para vincular cada sucursal con su comercio, el comercio tiene que tener el **Código ventas** (DISCO18, DEV3016…).
+
+## Usuarios
 
 | Usuario | Rol | Ve |
 |---|---|---|
-| `plateroadmin` | Administrador | Clientes, Zonas del mes, Visitas, **Control de jornada** |
-| `msayago` | Vendedor | App del celular + panel web sin Control de jornada |
+| `plateroadmin` | Administrador (jefe comercial) | Todo: armar semana, dashboard y alertas, comercios, ventas, visitas, control de jornada, barrios y listas |
+| `msayago` | Vendedor | App del celular + panel web: su semana, su dashboard, comercios y sus visitas |
 
-Las contraseñas iniciales se definen en el primer arranque con las variables `ADMIN_PASS` y `VENDOR_PASS` (no están escritas en el código). **Cambiá las dos la primera vez que entres** (botón "Cambiar contraseña" en el panel web).
+Las contraseñas iniciales se definen en el primer arranque con `ADMIN_PASS` y `VENDOR_PASS`. Se cambian desde el panel ("Cambiar contraseña").
 
-## Publicarlo en internet
+## Carga inicial
 
-El sistema necesita **HTTPS**: sin HTTPS el celular no permite usar el GPS. Cualquier servicio de hosting moderno lo da de forma automática.
+1. Panel → **Comercios** → *Elegir archivo* → subir `Comercios_sistema_visitas.xlsx` (o la plantilla `plantillas/Plantilla_Comercios.xlsx` completa). Si el archivo trae las hojas *Barrios* y *Listas*, también se cargan.
+2. Panel → **Ventas Serrana** → subir la *Consulta Factura Sucursal* tal como sale de GIA (o `plantillas/Plantilla_Ventas_Serrana.xlsx`).
+3. Panel → **Armar semana** → elegir barrios, marcar los sugeridos, asignarlos a un día y **Publicar semana**.
 
-Necesita:
-- Node.js 20 o superior (o Docker, hay un `Dockerfile` incluido).
-- Una **carpeta persistente** para la base de datos y las fotos. Se indica con la variable `DATA_DIR` (en Docker es `/data`).
+Los comercios sin link de Maps se ubican de a uno (más o menos uno por segundo). En Comercios se ve el estado: *Ubicado*, *Aproximado* (solo se encontró el barrio) o *Sin ubicación*. En esos casos conviene pegar el link de Google Maps con el botón **Link**.
 
-### Opción gratuita: Oracle Cloud Always Free
+## Actualizar un servidor que ya tiene la versión 1
 
-1. Subí esta carpeta a un repositorio de GitHub (público: el código no contiene contraseñas).
-2. En Oracle Cloud creá un servidor Ubuntu "Always Free" y en *Initialization script* subí `instalar-oracle.sh` con tus datos completos (repositorio y contraseñas iniciales).
-3. En la red del servidor (Security List) abrí los puertos 80 y 443.
-4. A los 10 minutos el sistema queda en `https://<IP-con-guiones>.sslip.io` (por ejemplo `https://150-230-1-2.sslip.io`).
-5. Para actualizar a una versión nueva: subirla a GitHub y en el servidor ejecutar `sudo actualizar-recorridas`.
+1. Subir esta versión al mismo repositorio de GitHub.
+2. En el servidor, hacer una copia de la base por las dudas:
+   `sudo sqlite3 /var/lib/recorridas/recorridas.db ".backup /var/backups/recorridas/antes-v2.db"`
+3. Ejecutar `sudo actualizar-recorridas`.
 
-Copias de seguridad diarias de la base en `/var/backups/recorridas` (se guardan 30 días). Registro de la instalación: `/var/log/recorridas-instalacion.log`.
+No hace falta cambiar nada más. Variables opcionales en `/etc/recorridas.env`:
 
-### Opción A: Railway o Render (pago, sin servidor propio)
+- `GEOCODER_EMAIL=correo@empresa.com`: se envía a OpenStreetMap para identificar al sistema (lo piden en su política de uso).
+- `GEOCODER=off`: apaga la ubicación automática por dirección.
 
-1. Subí esta carpeta a un repositorio de GitHub (privado).
-2. En Railway o Render, creá un servicio nuevo desde ese repositorio. Detecta el `Dockerfile` solo.
-3. Agregá un **volumen / disco persistente** montado en `/data`. Este paso es importante: sin él, la base y las fotos se borran en cada actualización.
-4. Si querés, cargá las variables `ADMIN_PASS` y `VENDOR_PASS` antes del primer arranque.
-5. Publicá. Te da una dirección `https://…` que es la que usan los dos.
+El servidor necesita salida a internet por HTTPS hacia `nominatim.openstreetmap.org` (en AWS la salida está abierta por defecto).
 
-Revisá el precio vigente del plan con disco persistente en el sitio del proveedor.
+## Instalación nueva
 
-### Opción B: servidor propio
+Necesita **HTTPS** (sin HTTPS el celular no deja usar el GPS), Node.js 20 o superior (o Docker, hay un `Dockerfile`) y una **carpeta persistente** para la base y las fotos (`DATA_DIR`; en Docker es `/data`).
 
-```bash
-npm ci --omit=dev
-DATA_DIR=/ruta/a/datos PORT=3000 node server.js
-```
+- **Servidor Ubuntu (AWS EC2, Lightsail u Oracle Cloud):** en *User data / Initialization script* pegar `instalar-oracle.sh` con los datos completos (repositorio y contraseñas iniciales). Abrir los puertos 80 y 443. A los 10 minutos queda en `https://<IP-con-guiones>.sslip.io`.
+- **Railway o Render:** crear el servicio desde el repositorio (detecta el `Dockerfile`) y agregar un disco persistente montado en `/data`.
+- **Servidor propio:** `npm ci --omit=dev` y `DATA_DIR=/ruta/a/datos PORT=3000 node server.js`, con un proxy HTTPS adelante (Caddy o Nginx).
 
-Poné un proxy con HTTPS adelante (por ejemplo Caddy o Nginx).
+Copias de seguridad diarias en `/var/backups/recorridas` (30 días).
 
 ## En el celular del vendedor
 
-1. Abrir la dirección del sistema en Chrome (Android) o Safari (iPhone) e ingresar con su usuario.
-2. Cuando lo pida, **permitir la ubicación** y la cámara.
-3. Menú del navegador → **"Agregar a pantalla de inicio"**: queda como una app.
-4. La sesión queda abierta 30 días en ese celular.
+1. Abrir la dirección del sistema en Chrome (Android) o Safari (iPhone) e ingresar.
+2. **Permitir la ubicación** y la cámara.
+3. Menú del navegador → **"Agregar a pantalla de inicio"**.
 
-Cómo usarla bien: marcar **SÍ/NO al llegar** al local y tocar **Guardar al irse**. Así se mide el tiempo en cada visita. Al final del día, siempre **Terminar jornada**.
-
-## Cómo funciona
-
-- **Sin link de Maps**: si una sucursal no tiene link, el sistema la ubica por dirección y zona con OpenStreetMap (aproximado; en la tabla aparece marcada con ≈). Pegando el link de Maps queda exacta.
-- **Importar Excel**: usá la plantilla ("Descargar plantilla" en Clientes). Cada archivo se suma a la base. Una sucursal se considera la misma si tiene la misma ubicación (a menos de 15 m) o el mismo nombre y dirección: en ese caso se actualiza, no se duplica. Antes de confirmar ves un resumen con nuevas, actualizadas, sin cambios, posibles repetidos y filas con error.
-- **Sugerencias**: primero las que quedaron pendientes (NO, o sin visitar al terminar la jornada); después las más cercanas entre sí que no tuvieron visita SÍ en el mes. El orden empieza en la ubicación del vendedor.
-- **Control de jornada**: inicio, cada visita (llegada, salida, minutos, distancia a la sucursal), hora y ubicación de cada foto, traslados, tiempo sin actividad y fin de jornada con su ubicación. Alertas si una foto o una visita se marcó a más de 300 m de la sucursal, si hubo más de 1 hora sin actividad antes del cierre o si no tocó "Terminar jornada".
-- **Tiempos estimados**: promedio de los últimos 30 días por tipo de cliente (BEC/MAN) y de los traslados. Se usan para estimar la duración de cada recorrida.
-
-## Copias de seguridad
-
-Todo está en la carpeta de datos (`recorridas.db` y la carpeta `fotos`). Copiala periódicamente. Además, desde Visitas podés exportar el Excel con todo.
+Uso: **Iniciar jornada** al salir; en cada comercio marcar **SÍ/NO al llegar** y **Guardar** al irse; **Terminar jornada** al final del día.
 
 ## Pruebas
 
-`python3 tests/e2e.py` levanta el sistema con una base vacía y prueba todas las funciones con un navegador real (requiere Python con `playwright`, `openpyxl` y `Pillow`).
-
-## Planilla de ventas (Disco, Devoto y Geant)
-
-En **Clientes → Planilla de ventas** (solo administrador) se sube la planilla de facturas (la misma "Consulta Factura Sucursal", una vez por mes). El sistema:
-
-- Toma solo facturas (no notas de crédito) de Disco, Devoto (Devoto Hnos y Devoto Express) y Geant.
-- Calcula hace cuántos días no hay venta en cada sucursal.
-- Vincula cada sucursal de la planilla con el cliente que tiene el mismo **Código ventas** (DISCO27, DEV3005, GEANT1…). Si el nombre del cliente es claro ("Disco Lostorto"), lo vincula solo.
-- Al armar la recorrida, después de las paradas que quedaron pendientes, entran primero los supermercados sin ventas hace 30 días o más (los de más días primero). El orden de la recorrida sigue siendo por cercanía.
-
-Los umbrales se pueden cambiar con las variables `URGENCIA_MEDIA_DIAS` (30) y `URGENCIA_ALTA_DIAS` (45).
+`npm test` levanta el sistema con una base vacía y datos inventados y prueba la importación, la regla de caída, la semana, la jornada, las urgencias y el dashboard.
